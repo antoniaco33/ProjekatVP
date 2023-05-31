@@ -10,13 +10,13 @@ namespace Common.Models
     {
         private int id;
         private DateTime timestamp;
-        private float measuredValue;
+        private double measuredValue;
 
         public int Id { get => id; set => id = value; }
         public DateTime Timestamp { get => timestamp; set => timestamp = value; }
-        public float MeasuredValue { get => measuredValue; set => measuredValue = value; }
+        public double MeasuredValue { get => measuredValue; set => measuredValue = value; }
 
-        public Load(int id, DateTime timestamp, float measuredValue)
+        public Load(int id, DateTime timestamp, double measuredValue)
         {
             this.id = id;
             this.timestamp = timestamp;
