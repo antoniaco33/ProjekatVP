@@ -27,7 +27,10 @@ namespace Common.Models
             this.type = type;
             this.message = message;
         }
+        public Audit()
+        {
 
+        }
 
 
     }

@@ -16,6 +16,10 @@ namespace Common
             this.MS = ms;
             this.FileName = fileName;
         }
+        public FileManipulationOptions()
+        {
+            this.MS = new MemoryStream();
+        }
 
         [DataMember]
         public MemoryStream MS { get; set; }

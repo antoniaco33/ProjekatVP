@@ -1,4 +1,5 @@
-﻿using Common.Models;
+﻿using Common;
+using Common.Models;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
@@ -14,21 +15,20 @@ namespace DataBase
 {
     public class Database
     {
-        private int ID;
+        private static int ID = 1;
 
         public List<Load> Read(string path)
         {
             List<Load> loads = new List<Load>();
 
-            using (FileStream fs = OpenFile(path))
+            using (FileManipulationOptions options = OpenFile(path))
             {
                 XmlDocument db = new XmlDocument();
-                db.Load(fs);
+                db.Load(options.MS);
 
                 string date = DateTime.Now.ToString("yyyy-MM-dd");
-                XmlNodeList rows = db.SelectNodes($"//row[TIME_STAMP = '{date}']");
+                XmlNodeList rows = db.SelectNodes("//row[TIME_STAMP[contains(., '" + date + "')]]");
 
-                ID = 1;
                 foreach (XmlNode row in rows)
                 {
                     Load load = new Load(ID++, DateTime.Parse(row.SelectSingleNode("TIME_STAMP").InnerText), double.Parse(row.SelectSingleNode("MEASURED_VALUE").InnerText));
@@ -36,25 +36,26 @@ namespace DataBase
                     loads.Add(load);
                 }
 
-                fs.Dispose();
+                options.Dispose();
             }
 
             return loads;
         }
 
-        public void Write(List<Load> loads, List<Audit> audits, string path)
+        public void Write(List<Load> loads, List<Audit> audits, string loadsPath, string auditsPath)
         {
-            WriteAudit(audits, path);
 
-            WriteLoad(loads, path);
+            WriteLoad(loads, loadsPath);
+            WriteAudit(audits, auditsPath);
+           
         }
 
         private void WriteAudit(List<Audit> audits, string path)
         {
-            using (FileStream fs = OpenFile(path))
+            using (FileManipulationOptions options = OpenFile(path))
             {
                 XmlDocument db = new XmlDocument();
-                db.Load(fs);
+                db.Load(options.MS);
 
                 XmlNodeList rows = db.SelectNodes("//STAVKA");
                 int maxID = rows.Count;
@@ -69,7 +70,7 @@ namespace DataBase
                     idElement.InnerText = a.Id.ToString();
 
                     XmlElement timeStampElement = db.CreateElement("TIME_STAMP");
-                    timeStampElement.InnerText = a.Timestamp.ToString("yyyy-MM-dd");
+                    timeStampElement.InnerText = a.Timestamp.ToString("yyyy-MM-dd HH:mm");
 
                     XmlElement messageTypeElement = db.CreateElement("MESSAGE_TYPE");
                     messageTypeElement.InnerText = a.Type.ToString();
@@ -113,18 +114,18 @@ namespace DataBase
                     db.Save(path);
                 }
 
-                fs.Dispose();
+                options.Dispose();
             }
         }
 
         private void WriteLoad(List<Load> podaci, string path)
         {
-            using (FileStream fs = OpenFile(path))
+            using (FileManipulationOptions options = OpenFile(path))
             {
                 XmlDocument db = new XmlDocument();
-                db.Load(fs);
+                db.Load(options.MS);
 
-                fs.Position = 0;
+                options.MS.Position = 0;
 
                 XmlNodeList rows = db.SelectNodes("//row");
                 int maxID = rows.Count;
@@ -150,10 +151,10 @@ namespace DataBase
                         XmlElement newRow = db.CreateElement("row");
 
                         XmlElement idElement = db.CreateElement("ID");
-                        idElement.InnerText = (++maxID).ToString();
+                        idElement.InnerText = l.Id.ToString();
 
                         XmlElement timeStampElement = db.CreateElement("TIME_STAMP");
-                        timeStampElement.InnerText = l.Timestamp.ToString("yyyy-MM-dd");
+                        timeStampElement.InnerText = l.Timestamp.ToString("yyyy-MM-dd HH:mm");
 
                         XmlElement measuredValueElement = db.CreateElement("MEASURED_VALUE");
                         measuredValueElement.InnerText = l.MeasuredValue.ToString();
@@ -168,17 +169,17 @@ namespace DataBase
                     }
                 }
 
-                fs.Dispose();
+                options.Dispose();
             }
         }
 
 
-        public FileStream OpenFile(string path)
+        public FileManipulationOptions OpenFile(string path)
         {
             if (!File.Exists(path))
             {
                 string start = "";
-                if (path.Contains("audit"))
+                if (path.ToLower().Contains("audit"))
                     start = "STAVKE";
                 else
                     start = "rows";
@@ -187,7 +188,17 @@ namespace DataBase
                 xml.Save(path);
             }
 
-            return new FileStream(path, FileMode.Open, FileAccess.ReadWrite);
+            MemoryStream stream = new MemoryStream();
+
+            using (FileStream xml = new FileStream(path, FileMode.Open, FileAccess.Read))
+            {
+                xml.CopyTo(stream);
+                xml.Dispose();
+            }
+
+            stream.Position = 0;
+
+            return new FileManipulationOptions(stream, Path.GetFileName(path));
         }
     }
 }

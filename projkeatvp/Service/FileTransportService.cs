@@ -6,67 +6,137 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.IO;
 using System.Linq;
+using System.ServiceModel;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace Service
 {
-    internal class FileTransportService : IFileTransport
+    public class FileTransportService : IFileTransport
     {
-        private readonly string csvFilePath;
-        private readonly Database database;
-        public FileTransportService(string csvFilePath)
-        {
-            this.csvFilePath = csvFilePath;
-            this.database = new Database();
-        }
-        public void SendDataToServer()
-        {
-            // Perform sending of the CSV file to the server
-            // Code for sending the file to the server goes here
+        public static Database db = new Database();
+        public Calculation calculation = new Calculation();
 
-            // Once the file is successfully sent, parse the data and store it in the database
-            ParseAndStoreData();
-        }
-
-        private void ParseAndStoreData()
+        public FileManipulationOptions GetCalculations(string command)
         {
-            try
+            List<Load> loads = db.Read(ConfigurationManager.AppSettings["DBLoads"]);
+            List<double> measuredValues = new List<double>();
+            foreach (Load load in loads)
             {
-                // Code for parsing the CSV file and storing the data in the database goes here
-                // Example: Read the CSV file, parse its contents, create Load objects, and store them in the database
+                measuredValues.Add(load.MeasuredValue);
+            }
 
-                using (var reader = new StreamReader(csvFilePath))
+            List<double> calcutaions = calculation.ProcessData(command, measuredValues);
+
+            var options = new FileManipulationOptions();
+            options.FileName = DateTime.Now.ToString("yyyy-MM-dd_HH-mm") + ".txt";
+
+            var stringBuilder = new StringBuilder();
+
+            foreach (var number in calcutaions)
+            {
+                stringBuilder.AppendLine("Vrednost: " + number);
+            }
+
+            var bytes = Encoding.UTF8.GetBytes(stringBuilder.ToString());
+
+            options.MS = new MemoryStream(bytes);
+
+            return options;
+        }
+
+       
+        [OperationBehavior(AutoDisposeParameters = true)]
+        public bool ParseFile(FileManipulationOptions options, out List<Audit> errors)
+        {
+            errors = new List<Audit>();
+            List<Load> values = new List<Load>();
+            int line = 1;
+
+            using (StreamReader stream = new StreamReader(options.MS))
+            {
+                string data = stream.ReadToEnd();
+                string[] csv_rows = data.Split('\n');
+                string[] rows = csv_rows.Take(csv_rows.Length).ToArray();
+
+                foreach (var row in rows)
                 {
-                    while (!reader.EndOfStream)
+                    string[] rowSplit = row.Split(',');
+
+                    if (rowSplit.Length != 3)
                     {
-                        var line = reader.ReadLine();
-                        var values = line.Split(',');
-
-                        if (values.Length == 3 && int.TryParse(values[0], out int id) &&
-                            DateTime.TryParse(values[1], out DateTime timestamp) &&
-                            float.TryParse(values[2], out float measuredValue))
+                        errors.Add(
+                                new Audit(0, DateTime.Now, MessageType.Error, "Invalid data format in CSV file " + DateTime.Now.ToString("yyyy-MM-dd HH-mm"))
+                            );
+                    }
+                    else
+                    {
+                        if (!DateTime.TryParse(rowSplit[1], out DateTime vreme))
                         {
-                            var load = new Load
+                            errors.Add(
+                                new Audit(0, DateTime.Now, MessageType.Error, "Invalid Timestamp for date " + DateTime.Now.ToString("yyyy-MM-dd HH-mm"))
+                            );
+                        }
+                        else if (!int.TryParse(rowSplit[0], out int id))
+                        {
+                            errors.Add(
+                                new Audit(0, DateTime.Now, MessageType.Error, "Invalid Id for date " + DateTime.Now.ToString("yyyy-MM-dd HH-mm"))
+                            );
+                        }
+                        else
+                        {
+                            if (!double.TryParse(rowSplit[2], out double vrednost))
                             {
-                                Id = id,
-                                Timestamp = timestamp,
-                                MeasuredValue = measuredValue
-                            };
+                                errors.Add(
+                                new Audit(0, DateTime.Now, MessageType.Error, "Invalid Measured Value for date " + vreme.ToString("yyyy-MM-dd HH-mm"))
+                            );
+                            }
+                            else
+                            {
+                                if (vrednost < 0.0)
+                                {
+                                    errors.Add(
+                                        new Audit(0, DateTime.Now, MessageType.Warning, "Measured Value negative for date " + vreme.ToString("yyyy-MM-dd"))
+                                    );
 
-                            Database.Loads.Add(load);
+                                }
+
+                                else
+                                {
+                                    values.Add(
+                                        new Load(id, vreme, vrednost)
+                                    );
+                                }
+                            }
                         }
                     }
+                    line++;
                 }
-
-                database.SaveToXml(ConfigurationManager.AppSettings.Get("PathCSV"));
-                Console.WriteLine("Data stored in the database successfully.");
+                stream.Dispose();
             }
-            catch (Exception ex)
+            if (errors.Count == line - 1)
             {
-                Console.WriteLine("An error occurred while parsing and storing the data: " + ex.Message);
+                errors.Clear();
+                errors.Add(
+                        new Audit(0, DateTime.Now, MessageType.Error, "Invalid datastructure in CSV file " + DateTime.Now.ToString("yyyy-MM-dd"))
+                );
+
+                return false;
+            }
+
+            db.Write(values, errors, ConfigurationManager.AppSettings["DBLoads"], ConfigurationManager.AppSettings["DBAudits"]);
+
+            if (errors.Count > 0)
+            {
+                return false;
+            }
+            else
+            {
+                return true;
             }
         }
+
 
     }
 }
